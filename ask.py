@@ -397,16 +397,15 @@ else:
     with st.form(key="chat_form", clear_on_submit=True):
         st.write("Ask your question:")
         # Layout with text input and symbols
-        input_col, upload_col, record_col = st.columns([8, 1, 1])
-        with input_col:
+        col1, col2, col3 = st.columns([8, 1, 1])
+        with col1:
             user_input = st.text_input("Type here:", key="chat_input", value="", label_visibility="collapsed")
-        with upload_col:
+        with col2:
             upload_audio = st.file_uploader("", type=["m4a", "mp3", "wav"], key="upload_audio", label_visibility="collapsed")
-            st.markdown("📁", unsafe_allow_html=True)  # Display symbol
-        with record_col:
-            st.markdown("🎙️", unsafe_allow_html=True)  # Display symbol as placeholder
-            if st.button("Record", key="record_button"):
-                st.warning("Microphone recording not yet supported. Please upload an audio file instead.")
+            st.markdown("<div style='text-align: center;'>📁</div>", unsafe_allow_html=True)  # Centered symbol
+        with col3:
+            st.markdown("<div style='text-align: center;'>🎙️</div>", unsafe_allow_html=True)  # Centered symbol
+            st.markdown("<small>Mic not supported yet</small>", unsafe_allow_html=True)
 
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
