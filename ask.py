@@ -2,7 +2,6 @@ import streamlit as st
 from langchain.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 from langchain_core.runnables import RunnableSequence
-import mysql.connector
 import os
 from dotenv import load_dotenv
 import hashlib
@@ -10,63 +9,15 @@ import hashlib
 # Load environment variables from .env file
 load_dotenv()
 
-# Function to hash passwords for security
+# Function to hash passwords for security (kept for mock login)
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# Function to initialize MySQL database connection
+# Mock database initialization (no MySQL dependency)
 def init_db():
-    """Initialize MySQL database connection and create or update necessary tables."""
-    try:
-        conn = mysql.connector.connect(
-            host="localhost",
-            user=os.getenv("MYSQL_USER"),
-            password=os.getenv("MYSQL_PASSWORD"),
-            database="linkedin"
-        )
-        c = conn.cursor()
-        print("Connected to MySQL database.")  # Debug
-        
-        # Create users table
-        c.execute('''CREATE TABLE IF NOT EXISTS users
-                     (user_id VARCHAR(255) PRIMARY KEY, password VARCHAR(255), profile_data TEXT, job_data TEXT, career_goals TEXT)''')
-        print("Checked/created 'users' table.")  # Debug
-        
-        # Ensure columns exist in users table
-        for column, col_type in [
-            ('password', 'VARCHAR(255)'),
-            ('profile_data', 'TEXT'),
-            ('job_data', 'TEXT'),
-            ('career_goals', 'TEXT')
-        ]:
-            c.execute(f"SHOW COLUMNS FROM users LIKE '{column}'")
-            if c.fetchone() is None:
-                c.execute(f"ALTER TABLE users ADD COLUMN {column} {col_type}")
-                print(f"Added '{column}' to 'users'.")  # Debug
-        
-        # Create session_history table
-        c.execute('''CREATE TABLE IF NOT EXISTS session_history
-                     (user_id VARCHAR(255), session_group VARCHAR(255), session_id INT AUTO_INCREMENT PRIMARY KEY, 
-                      query TEXT, response TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        print("Checked/created 'session_history' table.")  # Debug
-        
-        # Ensure session_group column exists in session_history
-        try:
-            c.execute("SHOW COLUMNS FROM session_history LIKE 'session_group'")
-            if c.fetchone() is None:
-                c.execute("ALTER TABLE session_history ADD COLUMN session_group VARCHAR(255) AFTER user_id")
-                print("Added 'session_group' to 'session_history'.")  # Debug
-                c.execute("UPDATE session_history SET session_group = 'legacy_session' WHERE session_group IS NULL")
-                print("Updated existing rows with 'legacy_session'.")  # Debug
-        except mysql.connector.Error as e:
-            print(f"Error checking/adding 'session_group': {e}")  # Debug
-        
-        conn.commit()
-        print("Database initialized successfully.")  # Debug only
-        return conn, c
-    except mysql.connector.Error as err:
-        print(f"Database connection failed: {err}")  # Debug only
-        return None, None
+    """Mock database initialization for Streamlit Cloud compatibility."""
+    print("Mock database initialized.")  # Debug only
+    return None, None  # No real connection or cursor needed
 
 # Format profile data from manual inputs
 def format_profile_data(name, skills, about, experience, education):
@@ -98,17 +49,11 @@ def format_job_data(title, company, skills, description):
         context += f"Description: {description}"
     return context.strip() or "No job data provided."
 
-# Initialize database connection
+# Initialize mock database
 conn, c = init_db()
-if conn is None or c is None:
-    st.error("Failed to connect to the database. Please try again later.")
-    st.stop()
 
 # Initialize Groq LLM
-#llm = ChatGroq(model="mixtral-8x7b-32768", temperature=0, api_key=os.getenv("GROQ_API_KEY"))
 llm = ChatGroq(model="llama3-70b-8192", temperature=0, api_key=os.getenv("GROQ_API_KEY"))
-
-
 
 # Define a refined prompt with strict focus on the query
 unified_prompt = PromptTemplate(
@@ -133,7 +78,7 @@ unified_prompt = PromptTemplate(
       - If the query contains "career guidance" or "counseling," provide career advice based on the profile ({profile_context}) and career goals ({career_goals}), identifying missing skills and suggesting resources.
       - If the query contains "cover letter," generate a personalized cover letter using the profile ({profile_context}) and job details ({job_context}), noting any missing data.
       - If the query asks about the "previous question" or "last question," refer to the chat history ({chat_history}) to identify and respond with the last question asked in this session.
-      - For any other query, provide a concise, relevant response using the available data ({profile_context}, {job_context}, {career_goals}) and chat history ({chat_history}), or indicate if the intent is unclear and suggest clarification.
+      - For any other query, provide a concise, relevant response using the available data ({profile_context}, {job_context}, {career_goals}) and chat_history ({chat_history}), or indicate if the intent is unclear and suggest clarification.
     - Do not mix responses from different categories unless the query explicitly requests multiple tasks.
 
     Provide a clear, formatted response with markdown (e.g., **bold**, - bullets).
@@ -146,7 +91,7 @@ unified_chain = RunnableSequence(unified_prompt | llm)
 # Streamlit app setup
 st.title("LinkedIn Optimizer Chat")
 
-# Authentication
+# Authentication (mocked without database)
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_id = None
@@ -165,23 +110,15 @@ if not st.session_state.logged_in:
     
     if st.button("Login"):
         if login_email and login_password:
-            hashed_password = hash_password(login_password)
-            c.execute("SELECT profile_data, job_data, career_goals FROM users WHERE user_id=%s AND password=%s", (login_email, hashed_password))
-            result = c.fetchone()
-            if result:
-                st.session_state.logged_in = True
-                st.session_state.user_id = login_email
-                st.session_state.profile_context = result[0] if result[0] else ""
-                st.session_state.job_context = result[1] if result[1] else ""
-                st.session_state.career_goals = result[2] if result[2] else ""
-                st.session_state.chat_history = []
-                st.session_state.current_session = f"session_{hashlib.md5(str(os.urandom(16)).encode()).hexdigest()[:8]}"
-                st.session_state.input_value = ""
-                st.session_state.last_input = ""
-                st.success("Logged in successfully!")
-                print(f"User {login_email} logged in. New session: {st.session_state.current_session}")
-            else:
-                st.error("Invalid email or password.")
+            # Mock login (no database check)
+            st.session_state.logged_in = True
+            st.session_state.user_id = login_email
+            st.session_state.current_session = f"session_{hashlib.md5(str(os.urandom(16)).encode()).hexdigest()[:8]}"
+            st.session_state.chat_history = []
+            st.session_state.input_value = ""
+            st.session_state.last_input = ""
+            st.success("Logged in successfully!")
+            print(f"User {login_email} logged in. New session: {st.session_state.current_session}")
         else:
             st.error("Please enter both email and password.")
 
@@ -191,23 +128,15 @@ if not st.session_state.logged_in:
     
     if st.button("Sign Up"):
         if signup_email and signup_password:
-            hashed_password = hash_password(signup_password)
-            try:
-                c.execute("INSERT INTO users (user_id, password) VALUES (%s, %s)", (signup_email, hashed_password))
-                conn.commit()
-                st.session_state.logged_in = True
-                st.session_state.user_id = signup_email
-                st.session_state.profile_context = ""
-                st.session_state.job_context = ""
-                st.session_state.career_goals = ""
-                st.session_state.chat_history = []
-                st.session_state.current_session = f"session_{hashlib.md5(str(os.urandom(16)).encode()).hexdigest()[:8]}"
-                st.session_state.input_value = ""
-                st.session_state.last_input = ""
-                st.success("Account created and logged in!")
-                print(f"User {signup_email} signed up. New session: {st.session_state.current_session}")
-            except mysql.connector.IntegrityError:
-                st.error("Email already exists. Please log in.")
+            # Mock signup (no database insert)
+            st.session_state.logged_in = True
+            st.session_state.user_id = signup_email
+            st.session_state.current_session = f"session_{hashlib.md5(str(os.urandom(16)).encode()).hexdigest()[:8]}"
+            st.session_state.chat_history = []
+            st.session_state.input_value = ""
+            st.session_state.last_input = ""
+            st.success("Account created and logged in!")
+            print(f"User {signup_email} signed up. New session: {st.session_state.current_session}")
         else:
             st.error("Please enter both email and password.")
 else:
@@ -230,8 +159,6 @@ else:
         if st.button("Save Profile", key="save_profile"):
             profile_context = format_profile_data(profile_name, profile_skills, profile_about, profile_experience, profile_education)
             st.session_state.profile_context = profile_context
-            c.execute("UPDATE users SET profile_data=%s WHERE user_id=%s", (profile_context, user_id))
-            conn.commit()
             st.success("Profile saved successfully!")
             print(f"Profile saved for {user_id}: {profile_context}")
 
@@ -245,8 +172,6 @@ else:
         if st.button("Save Job Details", key="save_job"):
             job_context = format_job_data(job_title, job_company, job_skills, job_description)
             st.session_state.job_context = job_context
-            c.execute("UPDATE users SET job_data=%s WHERE user_id=%s", (job_context, user_id))
-            conn.commit()
             st.success("Job details saved successfully!")
             print(f"Job saved for {user_id}: {job_context}")
 
@@ -256,12 +181,10 @@ else:
         if st.button("Save Goals", key="save_goals"):
             if career_goals:
                 st.session_state.career_goals = career_goals
-                c.execute("UPDATE users SET career_goals=%s WHERE user_id=%s", (career_goals, user_id))
-            conn.commit()
-            st.success("Career goals saved!")
-            print(f"Career goals saved for {user_id}: {career_goals}")
-        else:
-            st.error("Please enter career goals.")
+                st.success("Career goals saved!")
+                print(f"Career goals saved for {user_id}: {career_goals}")
+            else:
+                st.error("Please enter career goals.")
 
         # Session Management
         st.subheader("Session Management")
@@ -273,49 +196,9 @@ else:
             st.success("New session created!")
             print(f"New session for {user_id}: {st.session_state.current_session}")
 
+        # Session History (mocked, no database)
         st.subheader("Session History")
-        try:
-            c.execute("""
-                SELECT session_group, query, timestamp
-                FROM session_history 
-                WHERE user_id=%s 
-                AND session_id IN (
-                    SELECT MIN(session_id) 
-                    FROM session_history 
-                    WHERE user_id=%s 
-                    GROUP BY session_group
-                )
-                ORDER BY timestamp DESC
-            """, (user_id, user_id))
-            sessions = c.fetchall()
-            for session_group, first_query, _ in sessions:
-                session_group = session_group if session_group else "legacy_session"
-                summary = (first_query[:30] + "...") if len(first_query) > 30 else first_query
-                if st.button(f"Session: {summary}", key=f"hist_{session_group}"):
-                    st.session_state.current_session = session_group
-                    st.session_state.chat_history = []
-                    st.session_state.input_value = ""
-                    st.session_state.last_input = ""
-                    c.execute("SELECT query, response FROM session_history WHERE user_id=%s AND session_group=%s ORDER BY session_id", (user_id, session_group))
-                    history = c.fetchall()
-                    for query, response in history:
-                        st.session_state.chat_history.append({"role": "You", "content": query})
-                        st.session_state.chat_history.append({"role": "Assistant", "content": response})
-                    st.success(f"Loaded session: {summary}")
-        except mysql.connector.Error as e:
-            st.warning(f"Could not load session history: {e}. Using basic session display.")
-            print(f"Session history query failed: {e}")
-            c.execute("SELECT query, response FROM session_history WHERE user_id=%s ORDER BY timestamp DESC LIMIT 10", (user_id,))
-            history = c.fetchall()
-            if history and st.button("Load Legacy Session", key="hist_legacy"):
-                st.session_state.current_session = "legacy_session"
-                st.session_state.chat_history = []
-                st.session_state.input_value = ""
-                st.session_state.last_input = ""
-                for query, response in history:
-                    st.session_state.chat_history.append({"role": "You", "content": query})
-                    st.session_state.chat_history.append({"role": "Assistant", "content": response})
-                st.success("Loaded legacy session data.")
+        st.info("Session history is not persisted without a database. It resets on app restart.")
 
     # Main Chat Interface
     st.markdown(f"**Current Session: {st.session_state.current_session[-8:]}**")
@@ -369,17 +252,9 @@ else:
 
             st.session_state.chat_history.append({"role": "You", "content": user_input})
             st.session_state.chat_history.append({"role": "Assistant", "content": response_text})
-            try:
-                c.execute("INSERT INTO session_history (user_id, session_group, query, response) VALUES (%s, %s, %s, %s)", 
-                          (user_id, st.session_state.current_session, user_input, response_text))
-                conn.commit()
-            except mysql.connector.Error as e:
-                st.warning(f"Failed to save chat to history: {e}. Continuing without saving.")
-                print(f"Insert into session_history failed: {e}")
-            
+            # No database save since MySQL is removed
             st.session_state.last_input = user_input
             st.session_state.input_value = ""
             st.rerun()
 
-# Close database connection
-conn.close()
+# No conn.close() since no database connection
