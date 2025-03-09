@@ -211,12 +211,16 @@ unified_chain = RunnableSequence(unified_prompt | llm)
 # Streamlit app setup
 st.title("LinkedIn Optimizer Chat")
 
-# Custom CSS to reduce WebRTC button size
+# Custom CSS to style WebRTC buttons and hide video elements
 st.markdown("""
     <style>
     .st-webrtc-button button {
         padding: 2px 8px;
         font-size: 12px;
+    }
+    /* Hide video stream or any desktop-like visuals */
+    .st-webrtc-video {
+        display: none !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -447,7 +451,7 @@ else:
             user_input = st.text_input("Type your question:", key="chat_input", value="", label_visibility="collapsed")
         with col2:
             upload_audio = st.file_uploader("Upload audio file", type=["m4a", "mp3", "wav"], key="upload_audio", label_visibility="collapsed")
-            st.markdown("<div style='text-align: center;'>📁</div>", unsafe_allow_html=True)  # Folder symbol only
+            st.markdown("<div style='text-align: center; padding-top: 5px;'>📁</div>", unsafe_allow_html=True)  # Folder symbol only
         with col3:
             # WebRTC microphone recording
             ctx = webrtc_streamer(
@@ -461,7 +465,7 @@ else:
                 audio_data = ctx.audio_processor.get_audio_data()
                 if audio_data is not None:
                     st.session_state.mic_audio = numpy_to_wav(audio_data)
-            if st.session_state.mic_audio:
+            elif not ctx.state.playing and st.session_state.mic_audio:
                 st.audio(st.session_state.mic_audio, format="audio/wav")
 
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
