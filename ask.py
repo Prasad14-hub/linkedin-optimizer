@@ -7,12 +7,13 @@ import os
 from dotenv import load_dotenv
 import hashlib
 from groq import Groq
+from gtts import gTTS
 import io
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Initialize Groq client for audio transcription and TTS
+# Initialize Groq client for audio transcription
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 # Function to hash passwords for security
@@ -24,17 +25,16 @@ def init_db():
     """Initialize PostgreSQL database connection to Neon and create or update necessary tables."""
     try:
         conn = psycopg2.connect(
-            host=os.getenv("PG_HOST"),  # e.g., "your_host.neon.tech"
-            port=os.getenv("PG_PORT", "5432"),  # Default PostgreSQL port
-            user=os.getenv("PG_USER"),  # e.g., "your_username"
-            password=os.getenv("PG_PASSWORD"),  # e.g., "your_password"
+            host=os.getenv("PG_HOST"),
+            port=os.getenv("PG_PORT", "5432"),
+            user=os.getenv("PG_USER"),
+            password=os.getenv("PG_PASSWORD"),
             database="linkedin",
-            sslmode="require"  # Neon requires SSL
+            sslmode="require"
         )
         c = conn.cursor()
         print("Connected to PostgreSQL database.")  # Debug
         
-        # Create users table
         c.execute('''CREATE TABLE IF NOT EXISTS users (
                      user_id VARCHAR(255) PRIMARY KEY, 
                      password VARCHAR(255), 
@@ -43,7 +43,6 @@ def init_db():
                      career_goals TEXT)''')
         print("Checked/created 'users' table.")  # Debug
         
-        # Ensure columns exist in users table
         for column, col_type in [
             ('password', 'VARCHAR(255)'),
             ('profile_data', 'TEXT'),
@@ -55,7 +54,6 @@ def init_db():
                 c.execute(f"ALTER TABLE users ADD COLUMN {column} {col_type}")
                 print(f"Added '{column}' to 'users'.")  # Debug
         
-        # Create session_history table
         c.execute('''CREATE TABLE IF NOT EXISTS session_history (
                      user_id VARCHAR(255), 
                      session_group VARCHAR(255), 
@@ -65,7 +63,6 @@ def init_db():
                      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         print("Checked/created 'session_history' table.")  # Debug
         
-        # Ensure session_group column exists in session_history
         c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='session_history' AND column_name='session_group'")
         if not c.fetchone():
             c.execute("ALTER TABLE session_history ADD COLUMN session_group VARCHAR(255)")
@@ -125,16 +122,15 @@ def transcribe_audio(audio_file):
         st.error(f"Failed to transcribe audio: {e}")
         return None
 
-# Function to convert text to audio using Groq TTS
+# Function to convert text to audio using gTTS
 def text_to_audio(text):
-    """Convert text response to audio using Groq TTS."""
+    """Convert text response to audio using gTTS."""
     try:
-        audio_response = groq_client.audio.speech.create(
-            text=text,
-            model="tts-1",  # Groq TTS model (adjust if different model is preferred)
-            voice="alloy"   # Default voice, can be changed (e.g., "echo", "fable")
-        )
-        return audio_response.content  # Returns binary audio data
+        tts = gTTS(text=text, lang='en')
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+        return audio_buffer.read()
     except Exception as e:
         st.error(f"Failed to generate audio: {e}")
         return None
@@ -192,9 +188,9 @@ if 'logged_in' not in st.session_state:
     st.session_state.job_context = ""
     st.session_state.career_goals = ""
     st.session_state.chat_history = []
-    st.session_state.current_session = None  # No default session
-    st.session_state.input_value = ""       # Initialize input value
-    st.session_state.last_input = ""        # Track last processed input
+    st.session_state.current_session = None
+    st.session_state.input_value = ""
+    st.session_state.last_input = ""
 
 if not st.session_state.logged_in:
     st.subheader("Login")
@@ -218,6 +214,7 @@ if not st.session_state.logged_in:
                 st.session_state.last_input = ""
                 st.success("Logged in successfully!")
                 print(f"User {login_email} logged in. New session: {st.session_state.current_session}")
+                st.rerun()  # Immediately refresh to show main UI
             else:
                 st.error("Invalid email or password.")
         else:
@@ -244,6 +241,7 @@ if not st.session_state.logged_in:
                 st.session_state.last_input = ""
                 st.success("Account created and logged in!")
                 print(f"User {signup_email} signed up. New session: {st.session_state.current_session}")
+                st.rerun()  # Immediately refresh to show main UI
             except psycopg2.IntegrityError:
                 st.error("Email already exists. Please log in.")
         else:
@@ -253,11 +251,10 @@ else:
 
     # Sidebar for Manual Inputs and Session Management
     with st.sidebar:
-        st.markdown(f"### Hello, {user_id}!")  # Improved "Welcome back" positioning
+        st.markdown(f"### Hello, {user_id}!")  
         
         st.header("Profile Setup")
         
-        # Manual Profile Inputs
         st.subheader("Your Profile")
         profile_name = st.text_input("Name", value="Prasad Gavhane" if not st.session_state.profile_context else "", key="profile_name")
         profile_skills = st.text_input("Skills", value="Python, Generative AI" if not st.session_state.profile_context else "", key="profile_skills")
@@ -273,7 +270,6 @@ else:
             st.success("Profile saved successfully!")
             print(f"Profile saved for {user_id}: {profile_context}")
 
-        # Manual Job Inputs
         st.subheader("Job Details")
         job_title = st.text_input("Job Title", value="Senior Software Engineer" if not st.session_state.job_context else "", key="job_title")
         job_company = st.text_input("Company", value="TechCorp" if not st.session_state.job_context else "", key="job_company")
@@ -288,7 +284,6 @@ else:
             st.success("Job details saved successfully!")
             print(f"Job saved for {user_id}: {job_context}")
 
-        # Career Goals
         st.subheader("Career Goals")
         career_goals = st.text_area("Enter your career goals:", value=st.session_state.career_goals, key="goals")
         if st.button("Save Goals", key="save_goals"):
@@ -301,7 +296,6 @@ else:
             else:
                 st.error("Please enter career goals.")
 
-        # Session Management
         st.subheader("Session Management")
         if st.button("Create New Session", key="new_session"):
             st.session_state.current_session = f"session_{hashlib.md5(str(os.urandom(16)).encode()).hexdigest()[:8]}"
@@ -359,7 +353,7 @@ else:
     st.markdown(f"**Current Session: {st.session_state.current_session[-8:]}**")
     st.markdown("I can help with profile analysis, job fit analysis, content enhancement, career counseling, or cover letter generation. What would you like to do?")
 
-    # Chat history display (oldest at top, newest at bottom)
+    # Chat history display
     for message in st.session_state.chat_history:
         if message["role"] == "You":
             st.markdown(
@@ -373,7 +367,6 @@ else:
                 unsafe_allow_html=True
             )
         else:
-            # Check if the response includes an audio component
             if isinstance(message["content"], tuple) and len(message["content"]) == 2:
                 text_response, audio_data = message["content"]
                 st.markdown(
@@ -402,64 +395,70 @@ else:
     # User input form at the bottom
     with st.form(key="chat_form", clear_on_submit=True):
         st.write("Ask your question:")
-        user_input = st.text_input("Type your question here:", key="chat_input", value="")
-        audio_input = st.file_uploader("Or upload an audio file (e.g., .m4a, .mp3):", type=["m4a", "mp3", "wav"], key="audio_input")
+        col1, col2, col3 = st.columns([5, 1, 1])
+        with col1:
+            user_input = st.text_input("Type here or use buttons:", key="chat_input", value="", label_visibility="collapsed")
+        with col2:
+            audio_upload = st.file_uploader("Upload audio", type=["m4a", "mp3", "wav"], key="audio_upload", label_visibility="collapsed")
+            if audio_upload:
+                st.session_state.audio_uploaded = audio_upload
+            upload_trigger = st.button("📁", key="upload_button")
+        with col3:
+            record_trigger = st.button("🎙️", key="record_button")  # Placeholder for future recording
+            
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
 
-        # Process input only if submitted and either text or audio is provided
-        if submit_button and (user_input or audio_input):
-            # Handle input source
-            if audio_input:
-                query = transcribe_audio(audio_input)
-                if not query:
-                    st.error("Audio transcription failed. Please try again.")
-                    st.stop()
+        # Process input
+        if submit_button or upload_trigger or record_trigger:
+            if record_trigger:
+                st.warning("Microphone recording not yet supported. Please upload an audio file instead.")
+                query = None
+            elif upload_trigger and 'audio_uploaded' in st.session_state and st.session_state.audio_uploaded:
+                query = transcribe_audio(st.session_state.audio_uploaded)
+                del st.session_state.audio_uploaded  # Clear after use
             else:
                 query = user_input
 
-            chat_history_str = "\n".join(
-                f"{msg['role']}: {msg['content'][0] if isinstance(msg['content'], tuple) else msg['content']}"
-                for msg in st.session_state.chat_history
-            ) if st.session_state.chat_history else "No previous chat history in this session."
+            if query:
+                chat_history_str = "\n".join(
+                    f"{msg['role']}: {msg['content'][0] if isinstance(msg['content'], tuple) else msg['content']}"
+                    for msg in st.session_state.chat_history
+                ) if st.session_state.chat_history else "No previous chat history in this session."
 
-            # Get response from LLM
-            response = unified_chain.invoke({
-                "query": query,
-                "profile_context": st.session_state.profile_context or "No profile data provided.",
-                "job_context": st.session_state.job_context or "No job_data provided.",
-                "career_goals": st.session_state.career_goals or "No career goals provided.",
-                "chat_history": chat_history_str
-            })
+                response = unified_chain.invoke({
+                    "query": query,
+                    "profile_context": st.session_state.profile_context or "No profile data provided.",
+                    "job_context": st.session_state.job_context or "No job data provided.",
+                    "career_goals": st.session_state.career_goals or "No career goals provided.",
+                    "chat_history": chat_history_str
+                })
 
-            response_text = response.content if hasattr(response, 'content') else str(response)
+                response_text = response.content if hasattr(response, 'content') else str(response)
 
-            # Handle output type
-            if output_type == "Audio":
-                audio_data = text_to_audio(response_text)
-                if audio_data:
-                    response_content = (response_text, audio_data)
+                if output_type == "Audio":
+                    audio_data = text_to_audio(response_text)
+                    if audio_data:
+                        response_content = (response_text, audio_data)
+                    else:
+                        response_content = response_text
                 else:
-                    response_content = response_text  # Fallback to text if audio fails
-            else:
-                response_content = response_text
+                    response_content = response_text
 
-            # Update chat history
-            st.session_state.chat_history.append({"role": "You", "content": query})
-            st.session_state.chat_history.append({"role": "Assistant", "content": response_content})
+                st.session_state.chat_history.append({"role": "You", "content": query})
+                st.session_state.chat_history.append({"role": "Assistant", "content": response_content})
 
-            # Save to database (store only text for consistency)
-            try:
-                c.execute("INSERT INTO session_history (user_id, session_group, query, response) VALUES (%s, %s, %s, %s)", 
-                          (user_id, st.session_state.current_session, query, response_text))
-                conn.commit()
-            except psycopg2.Error as e:
-                st.warning(f"Failed to save chat to history: {e}. Continuing without saving.")
-                print(f"Insert into session_history failed: {e}")
-            
-            st.session_state.last_input = query
-            st.session_state.input_value = ""
-            st.rerun()
+                try:
+                    c.execute("INSERT INTO session_history (user_id, session_group, query, response) VALUES (%s, %s, %s, %s)", 
+                              (user_id, st.session_state.current_session, query, response_text))
+                    conn.commit()
+                except psycopg2.Error as e:
+                    st.warning(f"Failed to save chat to history: {e}. Continuing without saving.")
+                    print(f"Insert into session_history failed: {e}")
+                
+                st.session_state.last_input = query
+                st.session_state.input_value = ""
+                st.rerun()
 
 # Close database connection
 conn.close()
