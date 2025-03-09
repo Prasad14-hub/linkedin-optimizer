@@ -10,20 +10,20 @@ from groq import Groq
 from gtts import gTTS
 import io
 
-# Load environment variables from .env file
+# Hey, loading the environment variables from our .env file here - keeps secrets safe!
 load_dotenv()
 
-# Initialize Groq client (kept for potential future use, though not needed for text input)
+# Setting up the Groq client - not using it for transcription anymore, but keeping it handy.
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# Function to hash passwords for security
+# Simple function to hash passwords - keeps things secure for user login.
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# Function to initialize PostgreSQL database connection (using Neon)
+# Database setup function - connects to Neon PostgreSQL and gets tables ready.
 def init_db():
-    """Initialize PostgreSQL database connection to Neon and create or update necessary tables."""
     try:
+        # Connecting to the Neon DB with all the credentials from .env
         conn = psycopg2.connect(
             host=os.getenv("PG_HOST"),
             port=os.getenv("PG_PORT", "5432"),
@@ -33,16 +33,18 @@ def init_db():
             sslmode="require"
         )
         c = conn.cursor()
-        print("Connected to PostgreSQL database.")  # Debug
+        print("Nice, we’re in - connected to PostgreSQL!")
         
+        # Creating the users table if it doesn’t exist yet
         c.execute('''CREATE TABLE IF NOT EXISTS users (
                      user_id VARCHAR(255) PRIMARY KEY, 
                      password VARCHAR(255), 
                      profile_data TEXT, 
                      job_data TEXT, 
                      career_goals TEXT)''')
-        print("Checked/created 'users' table.")  # Debug
+        print("Users table is good to go.")
         
+        # Checking and adding any missing columns to users table - keeps it flexible
         for column, col_type in [
             ('password', 'VARCHAR(255)'),
             ('profile_data', 'TEXT'),
@@ -52,8 +54,9 @@ def init_db():
             c.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='{column}'")
             if not c.fetchone():
                 c.execute(f"ALTER TABLE users ADD COLUMN {column} {col_type}")
-                print(f"Added '{column}' to 'users'.")  # Debug
+                print(f"Added {column} to users table - wasn’t there before!")
         
+        # Setting up session_history table for chat logs
         c.execute('''CREATE TABLE IF NOT EXISTS session_history (
                      user_id VARCHAR(255), 
                      session_group VARCHAR(255), 
@@ -61,26 +64,26 @@ def init_db():
                      query TEXT, 
                      response TEXT, 
                      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        print("Checked/created 'session_history' table.")  # Debug
+        print("Session history table is set.")
         
+        # Making sure session_group column exists - older data might not have it
         c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='session_history' AND column_name='session_group'")
         if not c.fetchone():
             c.execute("ALTER TABLE session_history ADD COLUMN session_group VARCHAR(255)")
-            print("Added 'session_group' to 'session_history'.")  # Debug
+            print("Added session_group to session_history.")
             c.execute("UPDATE session_history SET session_group = 'legacy_session' WHERE session_group IS NULL")
-            print("Updated existing rows with 'legacy_session'.")  # Debug
+            print("Updated old rows with a default session group.")
         
         conn.commit()
-        print("Database initialized successfully.")  # Debug only
+        print("DB setup done - we’re ready to roll!")
         return conn, c
     except psycopg2.Error as err:
-        st.error(f"Failed to connect to PostgreSQL: {err}")
-        print(f"Database connection failed: {err}")  # Debug only
+        st.error(f"Uh-oh, couldn’t connect to PostgreSQL: {err}")
+        print(f"DB connection failed: {err}")
         return None, None
 
-# Format profile data from manual inputs
+# Handy function to format profile data into a neat string
 def format_profile_data(name, skills, about, experience, education):
-    """Format manually entered profile data into a string, handling empty fields."""
     context = ""
     if name:
         context += f"Name: {name}\n"
@@ -94,9 +97,8 @@ def format_profile_data(name, skills, about, experience, education):
         context += f"Education:\n{education}"
     return context.strip() or "No profile data provided."
 
-# Format job data from manual inputs
+# Same deal for job data - keeps it clean and readable
 def format_job_data(title, company, skills, description):
-    """Format manually entered job data into a string, handling empty fields."""
     context = ""
     if title:
         context += f"Job Title: {title}\n"
@@ -108,9 +110,8 @@ def format_job_data(title, company, skills, description):
         context += f"Description: {description}"
     return context.strip() or "No job data provided."
 
-# Function to convert text to audio using gTTS
+# Converts text to audio with gTTS - pretty cool for audio output option
 def text_to_audio(text):
-    """Convert text response to audio using gTTS."""
     try:
         tts = gTTS(text=text, lang='en')
         audio_buffer = io.BytesIO()
@@ -118,57 +119,54 @@ def text_to_audio(text):
         audio_buffer.seek(0)
         return audio_buffer.read()
     except Exception as e:
-        st.error(f"Failed to generate audio: {e}")
+        st.error(f"Couldn’t generate audio: {e}")
         return None
 
-# Initialize database connection
+# Let’s get that DB connection going
 conn, c = init_db()
 if conn is None or c is None:
-    st.error("Failed to connect to the database. Please check your credentials or try again later.")
+    st.error("Database connection failed - check your credentials!")
     st.stop()
 
-# Initialize Groq LLM for text-to-text
+# Setting up the Groq LLM - this is our brain for text responses
 llm = ChatGroq(model="llama3-70b-8192", temperature=0, api_key=os.getenv("GROQ_API_KEY"))
 
-# Define a refined prompt with strict focus on the query
+# Here’s the beefy prompt - detailed instructions for the LLM to nail responses
 unified_prompt = PromptTemplate(
     input_variables=["query", "profile_context", "job_context", "career_goals", "chat_history"],
     template="""
-    You are a LinkedIn profile optimization assistant. You have the following user data:
-    - Profile: {profile_context}
+    You’re a LinkedIn profile optimization assistant here to help users polish their professional presence. You’ve got access to the following info:
+    - User’s Profile: {profile_context}
     - Job Details: {job_context}
     - Career Goals: {career_goals}
 
-    Here is the chat history for the current session:
+    Here’s what’s been said in this session so far:
     {chat_history}
 
-    The user has asked: "{query}"
+    The user just asked: "{query}"
 
-    **Instructions:**
-    - Respond **only** to the specific request in the query. Do not include additional unsolicited advice or content (e.g., career guidance, cover letters) unless explicitly asked.
-    - Match the query to one of the following categories and provide a focused response:
-      - If the query contains "profile analysis" or "analyze my profile," analyze the profile data ({profile_context}) and suggest improvements, noting any missing sections.
-      - If the query contains "job fit" or "job match" or "analyze job," compare the profile ({profile_context}) with the job details ({job_context}), provide a match score (0-100), and suggest improvements, noting missing data.
-      - If the query contains "enhance content" or "improve profile," enhance all provided sections of the profile ({profile_context}) aligned with the job details ({job_context}) or general best practices if no job data is provided.
-      - If the query contains "career guidance" or "counseling," provide career advice based on the profile ({profile_context}) and career_goals ({career_goals}), identifying missing skills and suggesting resources.
-      - If the query contains "cover letter," generate a personalized cover letter using the profile ({profile_context}) and job details ({job_context}), noting any missing data.
-      - If the query asks about "previous question" or "last question," refer to the chat history ({chat_history}) to identify and respond with the last question asked in this session.
-      - For any other query, provide a concise, relevant response using the available data ({profile_context}, {job_context}, {career_goals}) and chat_history ({chat_history}), or indicate if the intent is unclear and suggest clarification.
-    - Do not mix responses from different categories unless the query explicitly requests multiple tasks.
-
-    Provide a clear, formatted response with markdown (e.g., **bold**, - bullets).
+    **Here’s what I need you to do:**
+    - Stick strictly to what the user is asking for - no extra fluff or unsolicited advice unless they explicitly want it.
+    - Figure out what they’re after based on these categories and give a spot-on answer:
+      - If they say "profile analysis" or "analyze my profile," dig into their profile data ({profile_context}). Point out what’s strong, what’s weak, and suggest specific tweaks. Flag anything missing that could help.
+      - If it’s "job fit," "job match," or "analyze job," compare their profile ({profile_context}) to the job details ({job_context}). Give a match score from 0 to 100, explain why, and recommend upgrades. Note if data’s missing.
+      - For "enhance content" or "improve profile," take their profile sections ({profile_context}) and rewrite them to shine - align with the job ({job_context}) if it’s there, or just use LinkedIn best practices if not.
+      - If they want "career guidance" or "counseling," use their profile ({profile_context}) and goals ({career_goals}) to offer tailored advice. Highlight gaps in skills or experience and suggest practical next steps or resources.
+      - For "cover letter," whip up a custom cover letter using their profile ({profile_context}) and job details ({job_context}). Call out any missing info that’d make it better.
+      - If they ask about the "previous question" or "last question," check the chat history ({chat_history}), find the last thing they asked, and repeat or answer it clearly.
+      - For anything else, give a concise, relevant reply based on what you’ve got ({profile_context}, {job_context}, {career_goals}, {chat_history}). If it’s unclear what they mean, say so and ask them to clarify.
+    - Don’t mash up different tasks unless they specifically ask for a combo. Keep it clean and focused.
+    - Write naturally, like you’re explaining it to a friend - no fancy formatting tricks, just plain, clear language.
     """
 )
 
-# Initialize unified chain with RunnableSequence
+# Chaining the prompt with the LLM - makes it all flow together
 unified_chain = RunnableSequence(unified_prompt | llm)
 
-# Streamlit app setup
+# Kicking off the Streamlit app - simple title to start
 st.title("LinkedIn Optimizer Chat")
 
-# No custom CSS needed since file uploader and WebRTC are removed
-
-# Authentication
+# Login state setup - gotta track who’s in and their session
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_id = None
@@ -180,6 +178,7 @@ if 'logged_in' not in st.session_state:
     st.session_state.input_value = ""
     st.session_state.last_input = ""
 
+# If they’re not logged in, show the login/signup screens
 if not st.session_state.logged_in:
     st.subheader("Login")
     login_email = st.text_input("Email", key="login_email")
@@ -191,6 +190,7 @@ if not st.session_state.logged_in:
             c.execute("SELECT profile_data, job_data, career_goals FROM users WHERE user_id=%s AND password=%s", (login_email, hashed_password))
             result = c.fetchone()
             if result:
+                # User’s in! Set up their session
                 st.session_state.logged_in = True
                 st.session_state.user_id = login_email
                 st.session_state.profile_context = result[0] if result[0] else ""
@@ -200,13 +200,13 @@ if not st.session_state.logged_in:
                 st.session_state.current_session = f"session_{hashlib.md5(str(os.urandom(16)).encode()).hexdigest()[:8]}"
                 st.session_state.input_value = ""
                 st.session_state.last_input = ""
-                st.success("Logged in successfully!")
-                print(f"User {login_email} logged in. New session: {st.session_state.current_session}")
+                st.success("Logged in - welcome aboard!")
+                print(f"User {login_email} logged in. Session: {st.session_state.current_session}")
                 st.rerun()
             else:
-                st.error("Invalid email or password.")
+                st.error("Wrong email or password - try again.")
         else:
-            st.error("Please enter both email and password.")
+            st.error("Fill in both fields, please!")
 
     st.subheader("Sign Up")
     signup_email = st.text_input("Email", key="signup_email")
@@ -218,6 +218,7 @@ if not st.session_state.logged_in:
             try:
                 c.execute("INSERT INTO users (user_id, password) VALUES (%s, %s)", (signup_email, hashed_password))
                 conn.commit()
+                # New user’s ready - log them in right away
                 st.session_state.logged_in = True
                 st.session_state.user_id = signup_email
                 st.session_state.profile_context = ""
@@ -227,17 +228,17 @@ if not st.session_state.logged_in:
                 st.session_state.current_session = f"session_{hashlib.md5(str(os.urandom(16)).encode()).hexdigest()[:8]}"
                 st.session_state.input_value = ""
                 st.session_state.last_input = ""
-                st.success("Account created and logged in!")
-                print(f"User {signup_email} signed up. New session: {st.session_state.current_session}")
+                st.success("Signed up and logged in - let’s get started!")
+                print(f"User {signup_email} signed up. Session: {st.session_state.current_session}")
                 st.rerun()
             except psycopg2.IntegrityError:
-                st.error("Email already exists. Please log in.")
+                st.error("That email’s taken - log in instead.")
         else:
-            st.error("Please enter both email and password.")
+            st.error("Need an email and password to sign up!")
 else:
     user_id = st.session_state.user_id
 
-    # Sidebar for Manual Inputs and Session Management
+    # Sidebar stuff - profile, job, goals, and session controls
     with st.sidebar:
         st.markdown(f"### Hello, {user_id}!")  
         
@@ -255,7 +256,7 @@ else:
             st.session_state.profile_context = profile_context
             c.execute("UPDATE users SET profile_data=%s WHERE user_id=%s", (profile_context, user_id))
             conn.commit()
-            st.success("Profile saved successfully!")
+            st.success("Profile saved - looking good!")
             print(f"Profile saved for {user_id}: {profile_context}")
 
         st.subheader("Job Details")
@@ -269,7 +270,7 @@ else:
             st.session_state.job_context = job_context
             c.execute("UPDATE users SET job_data=%s WHERE user_id=%s", (job_context, user_id))
             conn.commit()
-            st.success("Job details saved successfully!")
+            st.success("Job details saved - all set!")
             print(f"Job saved for {user_id}: {job_context}")
 
         st.subheader("Career Goals")
@@ -279,10 +280,10 @@ else:
                 st.session_state.career_goals = career_goals
                 c.execute("UPDATE users SET career_goals=%s WHERE user_id=%s", (career_goals, user_id))
                 conn.commit()
-                st.success("Career goals saved!")
+                st.success("Goals saved - nice vision!")
                 print(f"Career goals saved for {user_id}: {career_goals}")
             else:
-                st.error("Please enter career goals.")
+                st.error("Gotta write some goals first!")
 
         st.subheader("Session Management")
         if st.button("Create New Session", key="new_session"):
@@ -290,11 +291,12 @@ else:
             st.session_state.chat_history = []
             st.session_state.input_value = ""
             st.session_state.last_input = ""
-            st.success("New session created!")
+            st.success("Fresh session started!")
             print(f"New session for {user_id}: {st.session_state.current_session}")
 
         st.subheader("Session History")
         try:
+            # Grabbing session summaries for the user
             c.execute("""
                 SELECT session_group, query, timestamp
                 FROM session_history 
@@ -323,8 +325,8 @@ else:
                         st.session_state.chat_history.append({"role": "Assistant", "content": response})
                     st.success(f"Loaded session: {summary}")
         except psycopg2.Error as e:
-            st.warning(f"Could not load session history: {e}. Using basic session display.")
-            print(f"Session history query failed: {e}")
+            st.warning(f"Session history load failed: {e}. Falling back to basics.")
+            print(f"History query bombed: {e}")
             c.execute("SELECT query, response FROM session_history WHERE user_id=%s ORDER BY timestamp DESC LIMIT 10", (user_id,))
             history = c.fetchall()
             if history and st.button("Load Legacy Session", key="hist_legacy"):
@@ -337,11 +339,11 @@ else:
                     st.session_state.chat_history.append({"role": "Assistant", "content": response})
                 st.success("Loaded legacy session data.")
 
-    # Main Chat Interface
+    # Main chat area - showing the session and what we can do
     st.markdown(f"**Current Session: {st.session_state.current_session[-8:]}**")
     st.markdown("I can help with profile analysis, job fit analysis, content enhancement, career counseling, or cover letter generation. What would you like to do?")
 
-    # Chat history display
+    # Displaying the chat history - user on right, assistant on left
     for message in st.session_state.chat_history:
         if message["role"] == "You":
             st.markdown(
@@ -380,21 +382,23 @@ else:
                     unsafe_allow_html=True
                 )
 
-    # User input form at the bottom (text input only)
+    # Input form - just text now, nice and simple
     with st.form(key="chat_form", clear_on_submit=True):
         st.write("Ask your question:")
         user_input = st.text_input("Type your question:", key="chat_input", value="", label_visibility="collapsed")
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
 
-        # Process input only on form submission
+        # When they hit submit, process the text input
         if submit_button and user_input:
             query = user_input
+            # Building chat history string for context
             chat_history_str = "\n".join(
                 f"{msg['role']}: {msg['content'][0] if isinstance(msg['content'], tuple) else msg['content']}"
                 for msg in st.session_state.chat_history
             ) if st.session_state.chat_history else "No previous chat history in this session."
 
+            # Firing off the query to the LLM
             response = unified_chain.invoke({
                 "query": query,
                 "profile_context": st.session_state.profile_context or "No profile data provided.",
@@ -405,6 +409,7 @@ else:
 
             response_text = response.content if hasattr(response, 'content') else str(response)
 
+            # Handling output type - text or audio
             if output_type == "Audio":
                 audio_data = text_to_audio(response_text)
                 if audio_data:
@@ -414,20 +419,22 @@ else:
             else:
                 response_content = response_text
 
+            # Adding to chat history
             st.session_state.chat_history.append({"role": "You", "content": query})
             st.session_state.chat_history.append({"role": "Assistant", "content": response_content})
 
+            # Saving to DB - gotta keep that history!
             try:
                 c.execute("INSERT INTO session_history (user_id, session_group, query, response) VALUES (%s, %s, %s, %s)", 
                           (user_id, st.session_state.current_session, query, response_text))
                 conn.commit()
             except psycopg2.Error as e:
-                st.warning(f"Failed to save chat to history: {e}. Continuing without saving.")
-                print(f"Insert into session_history failed: {e}")
+                st.warning(f"Couldn’t save to history: {e}. Moving on anyway.")
+                print(f"DB insert failed: {e}")
             
             st.session_state.last_input = query
             st.session_state.input_value = ""
             st.rerun()
 
-# Close database connection
+# Finally closing the DB connection
 conn.close()
