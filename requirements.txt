@@ -5,6 +5,3 @@ python-dotenv
 psycopg2-binary
 groq
 gtts
-streamlit-webrtc
-numpy
-scipy
