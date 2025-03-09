@@ -12,6 +12,7 @@ import io
 from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, RTCConfiguration
 from queue import Queue
 import numpy as np
+from scipy.io.wavfile import write
 
 # Load environment variables from .env file
 load_dotenv()
@@ -147,9 +148,8 @@ def transcribe_audio(audio_file):
 
 # Function to convert numpy audio to WAV bytes
 def numpy_to_wav(audio_data):
-    from scipy.io.wavfile import write
     buffer = io.BytesIO()
-    write(buffer, 16000, audio_data)  # Assuming 16kHz sample rate, common for WebRTC
+    write(buffer, 16000, audio_data)  # 16kHz sample rate
     buffer.seek(0)
     return buffer.read()
 
@@ -211,6 +211,16 @@ unified_chain = RunnableSequence(unified_prompt | llm)
 # Streamlit app setup
 st.title("LinkedIn Optimizer Chat")
 
+# Custom CSS to reduce WebRTC button size
+st.markdown("""
+    <style>
+    .st-webrtc-button button {
+        padding: 2px 8px;
+        font-size: 12px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # Authentication
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -223,7 +233,7 @@ if 'logged_in' not in st.session_state:
     st.session_state.input_value = ""
     st.session_state.last_input = ""
     st.session_state.audio_uploaded = None
-    st.session_state.mic_recording = False
+    st.session_state.mic_audio = None
 
 if not st.session_state.logged_in:
     st.subheader("Login")
@@ -335,6 +345,7 @@ else:
             st.session_state.chat_history = []
             st.session_state.input_value = ""
             st.session_state.last_input = ""
+            st.session_state.mic_audio = None
             st.success("New session created!")
             print(f"New session for {user_id}: {st.session_state.current_session}")
 
@@ -361,6 +372,7 @@ else:
                     st.session_state.chat_history = []
                     st.session_state.input_value = ""
                     st.session_state.last_input = ""
+                    st.session_state.mic_audio = None
                     c.execute("SELECT query, response FROM session_history WHERE user_id=%s AND session_group=%s ORDER BY session_id", (user_id, session_group))
                     history = c.fetchall()
                     for query, response in history:
@@ -377,6 +389,7 @@ else:
                 st.session_state.chat_history = []
                 st.session_state.input_value = ""
                 st.session_state.last_input = ""
+                st.session_state.mic_audio = None
                 for query, response in history:
                     st.session_state.chat_history.append({"role": "You", "content": query})
                     st.session_state.chat_history.append({"role": "Assistant", "content": response})
@@ -434,7 +447,7 @@ else:
             user_input = st.text_input("Type your question:", key="chat_input", value="", label_visibility="collapsed")
         with col2:
             upload_audio = st.file_uploader("Upload audio file", type=["m4a", "mp3", "wav"], key="upload_audio", label_visibility="collapsed")
-            st.markdown("<div style='text-align: center;'>📁</div>", unsafe_allow_html=True)  # Folder logo
+            st.markdown("<div style='text-align: center;'>📁</div>", unsafe_allow_html=True)  # Folder symbol only
         with col3:
             # WebRTC microphone recording
             ctx = webrtc_streamer(
@@ -444,7 +457,12 @@ else:
                 media_stream_constraints={"video": False, "audio": True},
                 async_processing=True
             )
-            st.markdown("<div style='text-align: center;'>🎙️</div>", unsafe_allow_html=True)  # Mic symbol
+            if ctx.state.playing and ctx.audio_processor:
+                audio_data = ctx.audio_processor.get_audio_data()
+                if audio_data is not None:
+                    st.session_state.mic_audio = numpy_to_wav(audio_data)
+            if st.session_state.mic_audio:
+                st.audio(st.session_state.mic_audio, format="audio/wav")
 
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
@@ -453,13 +471,9 @@ else:
         if submit_button:
             if upload_audio:
                 query = transcribe_audio(upload_audio.read())
-            elif ctx and ctx.audio_processor:
-                audio_data = ctx.audio_processor.get_audio_data()
-                if audio_data is not None:
-                    wav_data = numpy_to_wav(audio_data)
-                    query = transcribe_audio(wav_data)
-                else:
-                    query = user_input
+            elif st.session_state.mic_audio:
+                query = transcribe_audio(st.session_state.mic_audio)
+                st.session_state.mic_audio = None  # Clear after processing
             else:
                 query = user_input
 
@@ -501,6 +515,7 @@ else:
                 
                 st.session_state.last_input = query
                 st.session_state.input_value = ""
+                st.session_state.mic_audio = None
                 st.rerun()
 
 # Close database connection
