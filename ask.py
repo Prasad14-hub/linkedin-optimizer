@@ -396,27 +396,25 @@ else:
     # User input form at the bottom
     with st.form(key="chat_form", clear_on_submit=True):
         st.write("Ask your question:")
-        # Layout with text input and symbols in a single row
-        col1, col2, col3 = st.columns([8, 1, 1])
-        with col1:
+        # Layout with text input and symbols
+        input_col, upload_col, record_col = st.columns([8, 1, 1])
+        with input_col:
             user_input = st.text_input("Type here:", key="chat_input", value="", label_visibility="collapsed")
-        with col2:
-            if st.button("📁", key="upload_button"):
-                audio_upload = st.file_uploader("Upload audio", type=["m4a", "mp3", "wav"], key="audio_upload", label_visibility="collapsed")
-                if audio_upload:
-                    st.session_state.audio_uploaded = audio_upload
-        with col3:
-            if st.button("🎙️", key="record_button"):
+        with upload_col:
+            upload_audio = st.file_uploader("", type=["m4a", "mp3", "wav"], key="upload_audio", label_visibility="collapsed")
+            st.markdown("📁", unsafe_allow_html=True)  # Display symbol
+        with record_col:
+            st.markdown("🎙️", unsafe_allow_html=True)  # Display symbol as placeholder
+            if st.button("Record", key="record_button"):
                 st.warning("Microphone recording not yet supported. Please upload an audio file instead.")
 
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
 
-        # Process input
-        if submit_button and (user_input or 'audio_uploaded' in st.session_state):
-            if 'audio_uploaded' in st.session_state and st.session_state.audio_uploaded:
-                query = transcribe_audio(st.session_state.audio_uploaded)
-                del st.session_state.audio_uploaded  # Clear after use
+        # Process input only on form submission
+        if submit_button:
+            if upload_audio:
+                query = transcribe_audio(upload_audio)
             else:
                 query = user_input
 
