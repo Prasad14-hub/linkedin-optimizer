@@ -1,5 +1,5 @@
 streamlit
 langchain
 langchain-groq
-mysql-connector-python
 python-dotenv
+psycopg2-binary
