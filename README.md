@@ -40,6 +40,9 @@ Alright, let’s get this thing up and running on your machine. It’s pretty st
 ### Step-by-Step Setup
 1. **Clone the Repo**:
    ```bash
+   git clone https://github.com/Prasad14-hub/linkedin-optimizer.git
+   cd linkedin-optimizer
+   
 Set Up a Virtual Environment:
    git clone https://github.com/Prasad14-hub/linkedin-optimizer.git
    cd linkedin-optimizer
