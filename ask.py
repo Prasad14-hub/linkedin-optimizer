@@ -166,7 +166,7 @@ unified_prompt = PromptTemplate(
       - If the query contains "enhance content" or "improve profile," enhance all provided sections of the profile ({profile_context}) aligned with the job details ({job_context}) or general best practices if no job data is provided.
       - If the query contains "career guidance" or "counseling," provide career advice based on the profile ({profile_context}) and career_goals ({career_goals}), identifying missing skills and suggesting resources.
       - If the query contains "cover letter," generate a personalized cover letter using the profile ({profile_context}) and job details ({job_context}), noting any missing data.
-      - If the query asks about the "previous question" or "last question," refer to the chat history ({chat_history}) to identify and respond with the last question asked in this session.
+      - If the query asks about "previous question" or "last question," refer to the chat history ({chat_history}) to identify and respond with the last question asked in this session.
       - For any other query, provide a concise, relevant response using the available data ({profile_context}, {job_context}, {career_goals}) and chat_history ({chat_history}), or indicate if the intent is unclear and suggest clarification.
     - Do not mix responses from different categories unless the query explicitly requests multiple tasks.
 
@@ -191,6 +191,7 @@ if 'logged_in' not in st.session_state:
     st.session_state.current_session = None
     st.session_state.input_value = ""
     st.session_state.last_input = ""
+    st.session_state.audio_uploaded = None
 
 if not st.session_state.logged_in:
     st.subheader("Login")
@@ -214,7 +215,7 @@ if not st.session_state.logged_in:
                 st.session_state.last_input = ""
                 st.success("Logged in successfully!")
                 print(f"User {login_email} logged in. New session: {st.session_state.current_session}")
-                st.rerun()  # Immediately refresh to show main UI
+                st.rerun()
             else:
                 st.error("Invalid email or password.")
         else:
@@ -241,7 +242,7 @@ if not st.session_state.logged_in:
                 st.session_state.last_input = ""
                 st.success("Account created and logged in!")
                 print(f"User {signup_email} signed up. New session: {st.session_state.current_session}")
-                st.rerun()  # Immediately refresh to show main UI
+                st.rerun()
             except psycopg2.IntegrityError:
                 st.error("Email already exists. Please log in.")
         else:
@@ -395,26 +396,25 @@ else:
     # User input form at the bottom
     with st.form(key="chat_form", clear_on_submit=True):
         st.write("Ask your question:")
-        col1, col2, col3 = st.columns([5, 1, 1])
+        # Layout with text input and symbols in a single row
+        col1, col2, col3 = st.columns([8, 1, 1])
         with col1:
-            user_input = st.text_input("Type here or use buttons:", key="chat_input", value="", label_visibility="collapsed")
+            user_input = st.text_input("Type here:", key="chat_input", value="", label_visibility="collapsed")
         with col2:
-            audio_upload = st.file_uploader("Upload audio", type=["m4a", "mp3", "wav"], key="audio_upload", label_visibility="collapsed")
-            if audio_upload:
-                st.session_state.audio_uploaded = audio_upload
-            upload_trigger = st.button("📁", key="upload_button")
+            if st.button("📁", key="upload_button"):
+                audio_upload = st.file_uploader("Upload audio", type=["m4a", "mp3", "wav"], key="audio_upload", label_visibility="collapsed")
+                if audio_upload:
+                    st.session_state.audio_uploaded = audio_upload
         with col3:
-            record_trigger = st.button("🎙️", key="record_button")  # Placeholder for future recording
-            
+            if st.button("🎙️", key="record_button"):
+                st.warning("Microphone recording not yet supported. Please upload an audio file instead.")
+
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
 
         # Process input
-        if submit_button or upload_trigger or record_trigger:
-            if record_trigger:
-                st.warning("Microphone recording not yet supported. Please upload an audio file instead.")
-                query = None
-            elif upload_trigger and 'audio_uploaded' in st.session_state and st.session_state.audio_uploaded:
+        if submit_button and (user_input or 'audio_uploaded' in st.session_state):
+            if 'audio_uploaded' in st.session_state and st.session_state.audio_uploaded:
                 query = transcribe_audio(st.session_state.audio_uploaded)
                 del st.session_state.audio_uploaded  # Clear after use
             else:
