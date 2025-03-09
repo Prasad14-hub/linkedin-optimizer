@@ -3,3 +3,5 @@ langchain
 langchain-groq
 python-dotenv
 psycopg2-binary
+groq
+gtts
