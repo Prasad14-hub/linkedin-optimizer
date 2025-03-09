@@ -6,9 +6,14 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 import hashlib
+from groq import Groq
+import io
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Initialize Groq client for audio transcription and TTS
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 # Function to hash passwords for security
 def hash_password(password):
@@ -38,7 +43,7 @@ def init_db():
                      career_goals TEXT)''')
         print("Checked/created 'users' table.")  # Debug
         
-        # Ensure columns exist in users table (PostgreSQL doesn’t need this check as often, but included for compatibility)
+        # Ensure columns exist in users table
         for column, col_type in [
             ('password', 'VARCHAR(255)'),
             ('profile_data', 'TEXT'),
@@ -106,13 +111,41 @@ def format_job_data(title, company, skills, description):
         context += f"Description: {description}"
     return context.strip() or "No job data provided."
 
+# Function to transcribe audio to text using Groq Whisper
+def transcribe_audio(audio_file):
+    """Transcribe audio file to text using Groq's Whisper model."""
+    try:
+        transcription = groq_client.audio.transcriptions.create(
+            file=(audio_file.name, audio_file.read()),
+            model="whisper-large-v3-turbo",
+            response_format="text"
+        )
+        return transcription
+    except Exception as e:
+        st.error(f"Failed to transcribe audio: {e}")
+        return None
+
+# Function to convert text to audio using Groq TTS
+def text_to_audio(text):
+    """Convert text response to audio using Groq TTS."""
+    try:
+        audio_response = groq_client.audio.speech.create(
+            text=text,
+            model="tts-1",  # Groq TTS model (adjust if different model is preferred)
+            voice="alloy"   # Default voice, can be changed (e.g., "echo", "fable")
+        )
+        return audio_response.content  # Returns binary audio data
+    except Exception as e:
+        st.error(f"Failed to generate audio: {e}")
+        return None
+
 # Initialize database connection
 conn, c = init_db()
 if conn is None or c is None:
     st.error("Failed to connect to the database. Please check your credentials or try again later.")
     st.stop()
 
-# Initialize Groq LLM
+# Initialize Groq LLM for text-to-text
 llm = ChatGroq(model="llama3-70b-8192", temperature=0, api_key=os.getenv("GROQ_API_KEY"))
 
 # Define a refined prompt with strict focus on the query
@@ -340,49 +373,91 @@ else:
                 unsafe_allow_html=True
             )
         else:
-            st.markdown(
-                f"""
-                <div style="display: flex; justify-content: flex-start; margin: 10px 0;">
-                    <div style="background-color: #ffffff; padding: 10px; border: 1px solid #e0e0e0; border-radius: 10px; max-width: 70%; word-wrap: break-word;">
-                        {message['content']}
+            # Check if the response includes an audio component
+            if isinstance(message["content"], tuple) and len(message["content"]) == 2:
+                text_response, audio_data = message["content"]
+                st.markdown(
+                    f"""
+                    <div style="display: flex; justify-content: flex-start; margin: 10px 0;">
+                        <div style="background-color: #ffffff; padding: 10px; border: 1px solid #e0e0e0; border-radius: 10px; max-width: 70%; word-wrap: break-word;">
+                            {text_response}
+                        </div>
                     </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+                    """,
+                    unsafe_allow_html=True
+                )
+                st.audio(audio_data, format="audio/mp3")
+            else:
+                st.markdown(
+                    f"""
+                    <div style="display: flex; justify-content: flex-start; margin: 10px 0;">
+                        <div style="background-color: #ffffff; padding: 10px; border: 1px solid #e0e0e0; border-radius: 10px; max-width: 70%; word-wrap: break-word;">
+                            {message['content']}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
     # User input form at the bottom
     with st.form(key="chat_form", clear_on_submit=True):
-        user_input = st.text_input("Your question:", key="chat_input", value="")
+        st.write("Ask your question:")
+        user_input = st.text_input("Type your question here:", key="chat_input", value="")
+        audio_input = st.file_uploader("Or upload an audio file (e.g., .m4a, .mp3):", type=["m4a", "mp3", "wav"], key="audio_input")
+        output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
 
-        # Process input only if submitted and non-empty
-        if submit_button and user_input:
+        # Process input only if submitted and either text or audio is provided
+        if submit_button and (user_input or audio_input):
+            # Handle input source
+            if audio_input:
+                query = transcribe_audio(audio_input)
+                if not query:
+                    st.error("Audio transcription failed. Please try again.")
+                    st.stop()
+            else:
+                query = user_input
+
             chat_history_str = "\n".join(
-                f"{msg['role']}: {msg['content']}" for msg in st.session_state.chat_history
+                f"{msg['role']}: {msg['content'][0] if isinstance(msg['content'], tuple) else msg['content']}"
+                for msg in st.session_state.chat_history
             ) if st.session_state.chat_history else "No previous chat history in this session."
 
+            # Get response from LLM
             response = unified_chain.invoke({
-                "query": user_input,
+                "query": query,
                 "profile_context": st.session_state.profile_context or "No profile data provided.",
-                "job_context": st.session_state.job_context or "No job data provided.",
+                "job_context": st.session_state.job_context or "No job_data provided.",
                 "career_goals": st.session_state.career_goals or "No career goals provided.",
                 "chat_history": chat_history_str
             })
 
             response_text = response.content if hasattr(response, 'content') else str(response)
 
-            st.session_state.chat_history.append({"role": "You", "content": user_input})
-            st.session_state.chat_history.append({"role": "Assistant", "content": response_text})
+            # Handle output type
+            if output_type == "Audio":
+                audio_data = text_to_audio(response_text)
+                if audio_data:
+                    response_content = (response_text, audio_data)
+                else:
+                    response_content = response_text  # Fallback to text if audio fails
+            else:
+                response_content = response_text
+
+            # Update chat history
+            st.session_state.chat_history.append({"role": "You", "content": query})
+            st.session_state.chat_history.append({"role": "Assistant", "content": response_content})
+
+            # Save to database (store only text for consistency)
             try:
                 c.execute("INSERT INTO session_history (user_id, session_group, query, response) VALUES (%s, %s, %s, %s)", 
-                          (user_id, st.session_state.current_session, user_input, response_text))
+                          (user_id, st.session_state.current_session, query, response_text))
                 conn.commit()
             except psycopg2.Error as e:
                 st.warning(f"Failed to save chat to history: {e}. Continuing without saving.")
                 print(f"Insert into session_history failed: {e}")
             
-            st.session_state.last_input = user_input
+            st.session_state.last_input = query
             st.session_state.input_value = ""
             st.rerun()
 
