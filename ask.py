@@ -9,12 +9,35 @@ import hashlib
 from groq import Groq
 from gtts import gTTS
 import io
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, RTCConfiguration
+from queue import Queue
+import numpy as np
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Initialize Groq client for audio transcription
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+# WebRTC configuration for audio-only streaming
+RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
+
+# Custom audio processor to capture audio frames
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.audio_queue = Queue()
+
+    def recv(self, frame):
+        self.audio_queue.put(frame.to_ndarray())
+        return frame
+
+    def get_audio_data(self):
+        audio_data = []
+        while not self.audio_queue.empty():
+            audio_data.append(self.audio_queue.get())
+        if audio_data:
+            return np.concatenate(audio_data, axis=0)
+        return None
 
 # Function to hash passwords for security
 def hash_password(password):
@@ -113,7 +136,7 @@ def transcribe_audio(audio_file):
     """Transcribe audio file to text using Groq's Whisper model."""
     try:
         transcription = groq_client.audio.transcriptions.create(
-            file=(audio_file.name, audio_file.read()),
+            file=("audio.wav", audio_file),
             model="whisper-large-v3-turbo",
             response_format="text"
         )
@@ -121,6 +144,14 @@ def transcribe_audio(audio_file):
     except Exception as e:
         st.error(f"Failed to transcribe audio: {e}")
         return None
+
+# Function to convert numpy audio to WAV bytes
+def numpy_to_wav(audio_data):
+    from scipy.io.wavfile import write
+    buffer = io.BytesIO()
+    write(buffer, 16000, audio_data)  # Assuming 16kHz sample rate, common for WebRTC
+    buffer.seek(0)
+    return buffer.read()
 
 # Function to convert text to audio using gTTS
 def text_to_audio(text):
@@ -192,6 +223,7 @@ if 'logged_in' not in st.session_state:
     st.session_state.input_value = ""
     st.session_state.last_input = ""
     st.session_state.audio_uploaded = None
+    st.session_state.mic_recording = False
 
 if not st.session_state.logged_in:
     st.subheader("Login")
@@ -396,16 +428,23 @@ else:
     # User input form at the bottom
     with st.form(key="chat_form", clear_on_submit=True):
         st.write("Ask your question:")
-        # Layout with text input and symbols
+        # Layout with text input, file upload, and mic
         col1, col2, col3 = st.columns([8, 1, 1])
         with col1:
-            user_input = st.text_input("Type here:", key="chat_input", value="", label_visibility="collapsed")
+            user_input = st.text_input("Type your question:", key="chat_input", value="", label_visibility="collapsed")
         with col2:
-            upload_audio = st.file_uploader("", type=["m4a", "mp3", "wav"], key="upload_audio", label_visibility="collapsed")
-            st.markdown("<div style='text-align: center;'>📁</div>", unsafe_allow_html=True)  # Centered symbol
+            upload_audio = st.file_uploader("Upload audio file", type=["m4a", "mp3", "wav"], key="upload_audio", label_visibility="collapsed")
+            st.markdown("<div style='text-align: center;'>📁</div>", unsafe_allow_html=True)  # Folder logo
         with col3:
-            st.markdown("<div style='text-align: center;'>🎙️</div>", unsafe_allow_html=True)  # Centered symbol
-            st.markdown("<small>Mic not supported yet</small>", unsafe_allow_html=True)
+            # WebRTC microphone recording
+            ctx = webrtc_streamer(
+                key="mic_input",
+                audio_processor_factory=AudioProcessor,
+                rtc_configuration=RTC_CONFIG,
+                media_stream_constraints={"video": False, "audio": True},
+                async_processing=True
+            )
+            st.markdown("<div style='text-align: center;'>🎙️</div>", unsafe_allow_html=True)  # Mic symbol
 
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
@@ -413,7 +452,14 @@ else:
         # Process input only on form submission
         if submit_button:
             if upload_audio:
-                query = transcribe_audio(upload_audio)
+                query = transcribe_audio(upload_audio.read())
+            elif ctx and ctx.audio_processor:
+                audio_data = ctx.audio_processor.get_audio_data()
+                if audio_data is not None:
+                    wav_data = numpy_to_wav(audio_data)
+                    query = transcribe_audio(wav_data)
+                else:
+                    query = user_input
             else:
                 query = user_input
 
