@@ -9,7 +9,7 @@ import hashlib
 from groq import Groq
 from gtts import gTTS
 import io
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, RTCConfiguration, WebRtcMode
 from queue import Queue
 import numpy as np
 from scipy.io.wavfile import write
@@ -211,15 +211,23 @@ unified_chain = RunnableSequence(unified_prompt | llm)
 # Streamlit app setup
 st.title("LinkedIn Optimizer Chat")
 
-# Custom CSS to style WebRTC buttons and hide video elements
+# Custom CSS to hide file uploader text and WebRTC video elements
 st.markdown("""
     <style>
+    /* Hide file uploader default text */
+    .stFileUploader > div > div > div > div {
+        display: none;
+    }
+    .stFileUploader > div > div > div > button {
+        display: none;
+    }
+    /* Style WebRTC buttons */
     .st-webrtc-button button {
         padding: 2px 8px;
         font-size: 12px;
     }
     /* Hide video stream or any desktop-like visuals */
-    .st-webrtc-video {
+    .st-webrtc-video, .element-container > div > div > video {
         display: none !important;
     }
     </style>
@@ -450,23 +458,25 @@ else:
         with col1:
             user_input = st.text_input("Type your question:", key="chat_input", value="", label_visibility="collapsed")
         with col2:
-            upload_audio = st.file_uploader("Upload audio file", type=["m4a", "mp3", "wav"], key="upload_audio", label_visibility="collapsed")
+            upload_audio = st.file_uploader("", type=["m4a", "mp3", "wav"], key="upload_audio", label_visibility="collapsed")
             st.markdown("<div style='text-align: center; padding-top: 5px;'>📁</div>", unsafe_allow_html=True)  # Folder symbol only
         with col3:
             # WebRTC microphone recording
             ctx = webrtc_streamer(
                 key="mic_input",
+                mode=WebRtcMode.SENDONLY,  # Audio only, no receive
                 audio_processor_factory=AudioProcessor,
                 rtc_configuration=RTC_CONFIG,
                 media_stream_constraints={"video": False, "audio": True},
                 async_processing=True
             )
-            if ctx.state.playing and ctx.audio_processor:
-                audio_data = ctx.audio_processor.get_audio_data()
-                if audio_data is not None:
-                    st.session_state.mic_audio = numpy_to_wav(audio_data)
-            elif not ctx.state.playing and st.session_state.mic_audio:
-                st.audio(st.session_state.mic_audio, format="audio/wav")
+            if ctx.audio_processor:
+                if ctx.state.playing:
+                    audio_data = ctx.audio_processor.get_audio_data()
+                    if audio_data is not None:
+                        st.session_state.mic_audio = numpy_to_wav(audio_data)
+                if st.session_state.mic_audio and not ctx.state.playing:
+                    st.audio(st.session_state.mic_audio, format="audio/wav")
 
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
