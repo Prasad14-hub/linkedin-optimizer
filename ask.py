@@ -29,7 +29,8 @@ class AudioProcessor(AudioProcessorBase):
         self.audio_queue = Queue()
 
     def recv(self, frame):
-        self.audio_queue.put(frame.to_ndarray())
+        audio_data = frame.to_ndarray()
+        self.audio_queue.put(audio_data)
         return frame
 
     def get_audio_data(self):
@@ -214,20 +215,27 @@ st.title("LinkedIn Optimizer Chat")
 # Custom CSS to hide file uploader text and WebRTC video elements
 st.markdown("""
     <style>
-    /* Hide file uploader default text */
-    .stFileUploader > div > div > div > div {
-        display: none;
-    }
+    /* Completely hide file uploader default text and buttons */
+    .stFileUploader label, 
+    .stFileUploader > div > div > div > div, 
     .stFileUploader > div > div > div > button {
-        display: none;
+        display: none !important;
+    }
+    .stFileUploader {
+        position: relative;
+        height: 30px;
+        width: 30px;
+        margin: 0 auto;
     }
     /* Style WebRTC buttons */
     .st-webrtc-button button {
         padding: 2px 8px;
         font-size: 12px;
     }
-    /* Hide video stream or any desktop-like visuals */
-    .st-webrtc-video, .element-container > div > div > video {
+    /* Hide any video or desktop-like visuals */
+    .st-webrtc-video, 
+    .element-container > div > div > video, 
+    .stWebRtcStreamer > div > div > video {
         display: none !important;
     }
     </style>
@@ -471,12 +479,11 @@ else:
                 async_processing=True
             )
             if ctx.audio_processor:
-                if ctx.state.playing:
-                    audio_data = ctx.audio_processor.get_audio_data()
-                    if audio_data is not None:
-                        st.session_state.mic_audio = numpy_to_wav(audio_data)
-                if st.session_state.mic_audio and not ctx.state.playing:
-                    st.audio(st.session_state.mic_audio, format="audio/wav")
+                audio_data = ctx.audio_processor.get_audio_data()
+                if audio_data is not None:
+                    st.session_state.mic_audio = numpy_to_wav(audio_data)
+            if st.session_state.mic_audio:
+                st.audio(st.session_state.mic_audio, format="audio/wav")
 
         output_type = st.selectbox("Select output type:", ["Text", "Audio"], index=0, key="output_type")
         submit_button = st.form_submit_button(label="Ask")
